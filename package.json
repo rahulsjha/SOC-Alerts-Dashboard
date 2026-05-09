@@ -1,0 +1,17 @@
+{
+  "name": "soc-alerts-dashboard",
+  "version": "1.0.0",
+  "description": "Full-stack SOC Alerts Dashboard application",
+  "private": true,
+  "scripts": {
+    "setup": "bash setup.sh",
+    "backend": "cd backend && npm run dev",
+    "frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "build": "cd backend && npm install && cd ../frontend && npm install && npm run build",
+    "seed": "cd backend && npm run seed"
+  },
+  "devDependencies": {
+    "concurrently": "^7.6.0"
+  }
+}
