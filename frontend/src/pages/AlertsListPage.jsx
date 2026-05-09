@@ -1,49 +1,128 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { alertsAPI } from '../api';
 
-const severityColors = {
-  critical: 'bg-red-100 text-red-800',
-  high: 'bg-orange-100 text-orange-800',
-  medium: 'bg-yellow-100 text-yellow-800',
-  low: 'bg-blue-100 text-blue-800',
-  info: 'bg-gray-100 text-gray-800',
+const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
+
+const severityStyles = {
+  critical: 'bg-rose-100 text-rose-700 ring-1 ring-rose-200',
+  high: 'bg-orange-100 text-orange-700 ring-1 ring-orange-200',
+  medium: 'bg-amber-100 text-amber-700 ring-1 ring-amber-200',
+  low: 'bg-sky-100 text-sky-700 ring-1 ring-sky-200',
+  info: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
 };
 
-const statusColors = {
-  new: 'bg-purple-100 text-purple-800',
-  investigating: 'bg-blue-100 text-blue-800',
-  resolved: 'bg-green-100 text-green-800',
-  false_positive: 'bg-gray-100 text-gray-800',
+const statusStyles = {
+  new: 'bg-violet-100 text-violet-700 ring-1 ring-violet-200',
+  investigating: 'bg-sky-100 text-sky-700 ring-1 ring-sky-200',
+  resolved: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200',
+  false_positive: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
+};
+
+const categoryOptions = [
+  ['malware', 'Malware'],
+  ['phishing', 'Phishing'],
+  ['unauthorized_access', 'Unauthorized Access'],
+  ['data_exfiltration', 'Data Exfiltration'],
+  ['policy_violation', 'Policy Violation'],
+  ['suspicious_login', 'Suspicious Login']
+];
+
+const rangeOptions = [
+  ['all', 'All time'],
+  ['24h', 'Last 24 hours'],
+  ['7d', 'Last 7 days'],
+  ['30d', 'Last 30 days'],
+  ['custom', 'Custom range']
+];
+
+const sortFields = [
+  ['timestamp', 'Timestamp'],
+  ['severity', 'Severity']
+];
+
+const sortOrders = [
+  ['desc', 'Descending'],
+  ['asc', 'Ascending']
+];
+
+const deriveRangeDates = (range, startDate, endDate) => {
+  const today = new Date();
+  const toDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+
+  if (range === '24h') {
+    return {
+      startDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      endDate: toDay.toISOString()
+    };
+  }
+
+  if (range === '7d') {
+    return {
+      startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      endDate: toDay.toISOString()
+    };
+  }
+
+  if (range === '30d') {
+    return {
+      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      endDate: toDay.toISOString()
+    };
+  }
+
+  if (range === 'custom') {
+    return {
+      startDate: startDate ? new Date(`${startDate}T00:00:00.000`).toISOString() : undefined,
+      endDate: endDate ? new Date(`${endDate}T23:59:59.999`).toISOString() : undefined
+    };
+  }
+
+  return { startDate: undefined, endDate: undefined };
 };
 
 export default function AlertsListPage() {
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
-  const pageSize = 20;
+  const page = Number(searchParams.get('page') || '1');
   const severity = searchParams.get('severity') || '';
   const status = searchParams.get('status') || '';
   const category = searchParams.get('category') || '';
+  const range = searchParams.get('range') || 'all';
+  const startDateInput = searchParams.get('startDate') || '';
+  const endDateInput = searchParams.get('endDate') || '';
+  const q = searchParams.get('q') || '';
+  const sortBy = searchParams.get('sortBy') || 'timestamp';
+  const sortOrder = searchParams.get('sortOrder') || 'desc';
+
+  const resolvedDates = useMemo(
+    () => deriveRangeDates(range, startDateInput, endDateInput),
+    [range, startDateInput, endDateInput]
+  );
 
   useEffect(() => {
-    const fetchAlerts = async () => {
+    const loadAlerts = async () => {
       setLoading(true);
+
       try {
         const response = await alertsAPI.list({
           page,
-          limit: pageSize,
+          limit: 20,
           severity: severity || undefined,
           status: status || undefined,
           category: category || undefined,
-          sortBy: 'timestamp',
-          sortOrder: 'DESC'
+          q: q || undefined,
+          startDate: resolvedDates.startDate,
+          endDate: resolvedDates.endDate,
+          sortBy,
+          sortOrder
         });
+
         setAlerts(response.data.alerts);
         setTotal(response.data.total);
         setTotalPages(response.data.totalPages);
@@ -54,148 +133,251 @@ export default function AlertsListPage() {
       }
     };
 
-    fetchAlerts();
-  }, [page, severity, status, category]);
+    loadAlerts();
+  }, [page, severity, status, category, q, sortBy, sortOrder, resolvedDates.startDate, resolvedDates.endDate]);
 
-  const handleFilterChange = (newFilters) => {
-    setPage(1);
-    const params = new URLSearchParams();
-    if (severity) params.set('severity', severity);
-    if (status) params.set('status', status);
-    if (category) params.set('category', category);
-    Object.entries(newFilters).forEach(([key, value]) => {
-      if (value) params.set(key, value);
-      else params.delete(key);
+  const updateParams = (updates) => {
+    const next = new URLSearchParams(searchParams);
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') {
+        next.delete(key);
+      } else {
+        next.set(key, String(value));
+      }
     });
-    setSearchParams(params);
+
+    if (!updates.page) {
+      next.set('page', '1');
+    }
+
+    setSearchParams(next);
   };
 
-  const handleClearFilters = () => {
-    setPage(1);
-    setSearchParams({});
+  const clearFilters = () => {
+    setSearchParams({ page: '1', sortBy, sortOrder });
   };
+
+  const summaryText = total === 0
+    ? 'No alerts match the current filter set.'
+    : `Showing ${(page - 1) * 20 + 1} - ${Math.min(page * 20, total)} of ${total} alerts`;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Alerts List</h1>
-        <p className="text-gray-600 mt-1">Showing {Math.min((page - 1) * pageSize + 1, total)} - {Math.min(page * pageSize, total)} of {total} alerts</p>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <section className="rounded-[1.75rem] border border-slate-200/80 bg-white p-6 shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Severity
-            </label>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Alerts list</p>
+            <h1 className="mt-1 text-3xl font-semibold text-slate-950">Filter and sort the triage queue</h1>
+            <p className="mt-2 text-sm text-slate-600">{summaryText}</p>
+          </div>
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            Back to dashboard
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-6">
+          <div className="xl:col-span-2">
+            <label className="mb-2 block text-sm font-medium text-slate-700">Search</label>
+            <input
+              value={q}
+              onChange={(event) => updateParams({ q: event.target.value })}
+              placeholder="Search title, description, asset, or source"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
+            />
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Severity</label>
             <select
               value={severity}
-              onChange={(e) => handleFilterChange({ severity: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+              onChange={(event) => updateParams({ severity: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
             >
-              <option value="">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="info">Info</option>
+              <option value="">All severities</option>
+              {severityOrder.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Status
-            </label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Status</label>
             <select
               value={status}
-              onChange={(e) => handleFilterChange({ status: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+              onChange={(event) => updateParams({ status: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
             >
-              <option value="">All Statuses</option>
+              <option value="">All statuses</option>
               <option value="new">New</option>
               <option value="investigating">Investigating</option>
               <option value="resolved">Resolved</option>
-              <option value="false_positive">False Positive</option>
+              <option value="false_positive">False positive</option>
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Category
-            </label>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Category</label>
             <select
               value={category}
-              onChange={(e) => handleFilterChange({ category: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+              onChange={(event) => updateParams({ category: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
             >
-              <option value="">All Categories</option>
-              <option value="malware">Malware</option>
-              <option value="phishing">Phishing</option>
-              <option value="unauthorized_access">Unauthorized Access</option>
-              <option value="data_exfiltration">Data Exfiltration</option>
-              <option value="policy_violation">Policy Violation</option>
-              <option value="suspicious_login">Suspicious Login</option>
+              <option value="">All categories</option>
+              {categoryOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </div>
 
-          <div className="flex items-end">
-            <button
-              onClick={handleClearFilters}
-              className="w-full px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-medium transition"
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Time range</label>
+            <select
+              value={range}
+              onChange={(event) => updateParams({ range: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
             >
-              Clear Filters
-            </button>
+              {rangeOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Sort field</label>
+            <select
+              value={sortBy}
+              onChange={(event) => updateParams({ sortBy: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
+            >
+              {sortFields.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Sort order</label>
+            <select
+              value={sortOrder}
+              onChange={(event) => updateParams({ sortOrder: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
+            >
+              {sortOrders.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-      </div>
 
-      {/* Alerts Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+        {range === 'custom' && (
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Start date</label>
+              <input
+                type="date"
+                value={startDateInput}
+                onChange={(event) => updateParams({ startDate: event.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">End date</label>
+              <input
+                type="date"
+                value={endDateInput}
+                onChange={(event) => updateParams({ endDate: event.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-300 focus:bg-white focus:ring-4 focus:ring-slate-100"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            onClick={clearFilters}
+            className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
+            Clear filters
+          </button>
+          {['severity', 'status', 'category', 'range', 'q'].some((key) => searchParams.get(key)) && (
+            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+              {severity && <span className="rounded-full bg-slate-100 px-3 py-1">Severity: {severity}</span>}
+              {status && <span className="rounded-full bg-slate-100 px-3 py-1">Status: {status.replace(/_/g, ' ')}</span>}
+              {category && <span className="rounded-full bg-slate-100 px-3 py-1">Category: {category.replace(/_/g, ' ')}</span>}
+              {range !== 'all' && <span className="rounded-full bg-slate-100 px-3 py-1">Range: {range}</span>}
+              {q && <span className="rounded-full bg-slate-100 px-3 py-1">Search: {q}</span>}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
         {loading ? (
-          <div className="p-8 text-center text-gray-600">Loading alerts...</div>
+          <div className="p-10 text-center text-sm font-medium text-slate-600">Loading alerts...</div>
         ) : alerts.length === 0 ? (
-          <div className="p-8 text-center text-gray-600">No alerts found</div>
+          <div className="p-10 text-center text-sm font-medium text-slate-600">No alerts found for the current filters.</div>
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Title</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Severity</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Status</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Category</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Asset</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Time</th>
-                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Action</th>
+              <table className="min-w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50/80">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <th className="px-6 py-4">Title</th>
+                    <th className="px-6 py-4">Severity</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Category</th>
+                    <th className="px-6 py-4">Asset</th>
+                    <th className="px-6 py-4">Source</th>
+                    <th className="px-6 py-4">Timestamp</th>
+                    <th className="px-6 py-4">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y">
+                <tbody className="divide-y divide-slate-100">
                   {alerts.map((alert) => (
-                    <tr key={alert.id} className="hover:bg-gray-50 transition">
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">{alert.title}</td>
+                    <tr key={alert.id} className="transition hover:bg-slate-50/80">
                       <td className="px-6 py-4">
-                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${severityColors[alert.severity]}`}>
+                        <button
+                          onClick={() => navigate(`/alerts/${alert.id}`)}
+                          className="text-left text-sm font-semibold text-slate-950 transition hover:text-rose-600"
+                        >
+                          {alert.title}
+                        </button>
+                        <p className="mt-1 text-xs text-slate-500">{alert.id}</p>
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] ${severityStyles[alert.severity] || severityStyles.info}`}>
                           {alert.severity}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${statusColors[alert.status]}`}>
-                          {alert.status}
+                      <td className="px-6 py-4 text-sm">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${statusStyles[alert.status] || statusStyles.false_positive}`}>
+                          {alert.status.replace(/_/g, ' ')}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-600 capitalize">
-                        {alert.category.replace(/_/g, ' ')}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">{alert.affected_asset}</td>
-                      <td className="px-6 py-4 text-sm text-gray-600">
+                      <td className="px-6 py-4 text-sm text-slate-700 capitalize">{alert.category.replace(/_/g, ' ')}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700">{alert.affected_asset}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700">{alert.source}</td>
+                      <td className="px-6 py-4 text-sm text-slate-700 whitespace-nowrap">
                         {new Date(alert.timestamp).toLocaleString()}
                       </td>
                       <td className="px-6 py-4">
                         <button
                           onClick={() => navigate(`/alerts/${alert.id}`)}
-                          className="text-red-600 hover:text-red-900 font-medium text-sm"
+                          className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                         >
                           View
                         </button>
@@ -206,25 +388,22 @@ export default function AlertsListPage() {
               </table>
             </div>
 
-            {/* Pagination */}
-            <div className="bg-gray-50 px-6 py-4 flex items-center justify-between">
-              <div>
+            <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/80 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-600">
+                Page {page} of {totalPages}
+              </p>
+              <div className="flex gap-3">
                 <button
-                  onClick={() => setPage(Math.max(1, page - 1))}
-                  disabled={page === 1}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => updateParams({ page: Math.max(1, page - 1) })}
+                  disabled={page <= 1}
+                  className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Previous
                 </button>
-              </div>
-              <div className="text-sm text-gray-600">
-                Page {page} of {totalPages}
-              </div>
-              <div>
                 <button
-                  onClick={() => setPage(Math.min(totalPages, page + 1))}
-                  disabled={page === totalPages}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => updateParams({ page: Math.min(totalPages, page + 1) })}
+                  disabled={page >= totalPages}
+                  className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                 >
                   Next
                 </button>
@@ -232,7 +411,7 @@ export default function AlertsListPage() {
             </div>
           </>
         )}
-      </div>
+      </section>
     </div>
   );
 }

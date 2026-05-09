@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function Layout({ children }) {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
 
   const handleLogout = async () => {
     await logout();
@@ -12,30 +12,42 @@ export default function Layout({ children }) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center cursor-pointer" onClick={() => navigate('/dashboard')}>
-            <div className="text-red-600 font-bold text-2xl">🚨</div>
-            <h1 className="ml-2 text-xl font-bold text-gray-900">SOC Alerts</h1>
-          </div>
-          <nav className="flex items-center gap-6">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.9),_rgba(248,250,252,0.96)_35%,_rgba(241,245,249,1)_100%)] text-slate-900">
+      <header className="sticky top-0 z-20 border-b border-white/60 bg-slate-950/90 text-white backdrop-blur-xl shadow-[0_16px_40px_rgba(15,23,42,0.24)]">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-3 text-left"
+          >
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-rose-500 via-orange-500 to-amber-400 text-lg shadow-lg shadow-orange-500/25">
+              ⚠
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.32em] text-slate-400">SOC Console</p>
+              <h1 className="text-lg font-semibold leading-tight">Alerts Dashboard</h1>
+            </div>
+          </button>
+
+          <nav className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={() => navigate('/dashboard')}
-              className="text-gray-700 hover:text-gray-900 font-medium"
+              className="rounded-full px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10 hover:text-white"
             >
               Dashboard
             </button>
             <button
               onClick={() => navigate('/alerts')}
-              className="text-gray-700 hover:text-gray-900 font-medium"
+              className="rounded-full px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/10 hover:text-white"
             >
               Alerts
             </button>
+            <div className="hidden rounded-full border border-white/10 bg-white/5 px-4 py-2 text-right sm:block">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Signed in as</p>
+              <p className="text-sm font-medium text-white">{user?.name || user?.email || 'Security Analyst'}</p>
+            </div>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-medium transition"
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
             >
               Logout
             </button>
@@ -43,10 +55,7 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {children}
-      </main>
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
     </div>
   );
 }

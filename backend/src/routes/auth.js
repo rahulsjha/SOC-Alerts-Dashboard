@@ -1,7 +1,7 @@
 import express from 'express';
 import bcryptjs from 'bcryptjs';
 import db from '../db.js';
-import { generateToken } from '../auth.js';
+import { generateToken, setAuthCookie, clearAuthCookie, getAuthenticatedUser, verifyToken } from '../auth.js';
 
 const router = express.Router();
 
@@ -32,20 +32,15 @@ router.post('/login', (req, res) => {
       }
 
       const token = generateToken(user.id);
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-      });
+      setAuthCookie(res, token);
 
       res.json({
         user: {
           id: user.id,
           email: user.email,
-          name: user.name
-        },
-        token
+          name: user.name,
+          created_at: user.created_at
+        }
       });
     });
   });
@@ -53,7 +48,7 @@ router.post('/login', (req, res) => {
 
 // POST /auth/logout
 router.post('/logout', (req, res) => {
-  res.clearCookie('token');
+  clearAuthCookie(res);
   res.json({ message: 'Logged out successfully' });
 });
 
@@ -65,9 +60,23 @@ router.get('/me', (req, res) => {
     return res.status(401).json({ error: 'No token provided' });
   }
 
-  // For now, just verify the token is valid
-  // In production, decode and get user from DB
-  res.json({ authenticated: true });
+  const decoded = verifyToken(token);
+
+  if (!decoded) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+
+  getAuthenticatedUser(decoded.userId)
+    .then((user) => {
+      if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+      }
+
+      res.json({ user });
+    })
+    .catch((err) => {
+      res.status(500).json({ error: err.message });
+    });
 });
 
 export default router;

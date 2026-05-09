@@ -4,16 +4,36 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  font-family: 'Inter', sans-serif;
+html {
+  scroll-behavior: smooth;
+  background: #f8fafc;
 }
 
 body {
   margin: 0;
   padding: 0;
-  color: #111827;
+  color: #0f172a;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 35%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
 }
 
-html {
-  scroll-behavior: smooth;
+body,
+button,
+input,
+select,
+textarea {
+  font-family: 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(15, 23, 42, 0.14);
+}
+
+button {
+  cursor: pointer;
 }
