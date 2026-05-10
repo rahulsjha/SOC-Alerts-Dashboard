@@ -7,7 +7,7 @@ var vite_config_default = defineConfig({
     port: 3e3,
     proxy: {
       "/api": {
-        target: "http://localhost:5000",
+        target: "http://https://alert-dashboard-e70x.onrender.com",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, "")
       }

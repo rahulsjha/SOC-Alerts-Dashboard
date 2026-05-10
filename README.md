@@ -200,6 +200,7 @@ npm test
 Current coverage:
 
 - `deriveRangeDates` utility behavior for all/custom/rolling ranges
+- `alertsListTools` preset and bulk-selection helpers
 
 ## Build
 
@@ -207,6 +208,16 @@ Current coverage:
 cd frontend
 npm run build
 ```
+
+## Approach Summary
+
+The implementation deliberately favors a production-like shape:
+
+- No local SQLite file in the final runtime path.
+- No random seed generation at startup.
+- No hidden test-only mocks in the production routes.
+- A deterministic JSON data file makes the seed process transparent and reproducible.
+- Docker support remains available for local full-stack runs, but Render deployment can use the native build/start commands above.
 
 ## Architecture
 
@@ -234,91 +245,6 @@ flowchart LR
 - JSONB for raw event data keeps the full source event available without forcing a rigid schema for every nested field.
 - Deterministic seed data makes demos repeatable and avoids random test data drifting between runs.
 
-## Deployment on Render
-
-This repository is set up to deploy as separate Render services:
-
-### 1. Create a Render PostgreSQL database
-
-Use Render's PostgreSQL add-on and copy the connection string.
-
-Recommended value to use in the backend service:
-
-- `DATABASE_URL` or `EXTERNAL_DATABASE_URL`
-
-### 2. Deploy the backend as a Web Service
-
-Set these values in the Render service:
-
-- Root directory: `backend`
-- Build command: `npm install`
-- Start command: `npm start`
-
-Environment variables:
-
-- `DATABASE_URL` = your Render Postgres connection string
-- `JWT_SECRET` = a strong secret
-- `FRONTEND_URL` = your deployed frontend URL, for example `https://soc-alerts-dashboard-frontend.onrender.com`
-- `PORT` = Render will provide this automatically; the app already reads it
-
-If you want to seed data after deploy, open the Render shell and run:
-
-```bash
-npm run seed
-```
-
-### 3. Deploy the frontend as a Static Site
-
-Set these values in the Render service:
-
-- Root directory: `frontend`
-- Build command: `npm install && npm run build`
-- Publish directory: `dist`
-
-Environment variables:
-
-- `VITE_API_URL` = your backend service URL, for example `https://soc-alerts-dashboard-backend.onrender.com/api`
-
-### 4. Verify the deployment
-
-1. Visit the frontend URL.
-2. Log in using the seeded analyst account.
-3. Confirm the dashboard loads, the alerts list opens, and detail pages update successfully.
-4. Check backend health with `/api/health`.
-
-## Recommended Render Commands
-
-If you prefer a quick copy/paste checklist, these are the important commands:
-
-Backend service:
-
-```bash
-npm install
-npm start
-```
-
-Backend seed step:
-
-```bash
-npm run seed
-```
-
-Frontend static site:
-
-```bash
-npm install && npm run build
-```
-
-## Approach Summary
-
-The implementation deliberately favors a production-like shape:
-
-- No local SQLite file in the final runtime path.
-- No random seed generation at startup.
-- No hidden test-only mocks in the production routes.
-- A deterministic JSON data file makes the seed process transparent and reproducible.
-- Docker support remains available for local full-stack runs, but Render deployment can use the native build/start commands above.
-
 ## What Could Be Better With More Time
 
 - Add end-to-end browser tests for login, filter presets, and bulk actions.
@@ -328,6 +254,21 @@ The implementation deliberately favors a production-like shape:
 - Add pagination state to saved presets if you want the exact same view restored.
 - Add row-level loading states so bulk updates show progress per selected alert.
 - Add audit log entries for triage actions.
+
+## Deployment
+
+⚠️ **CRITICAL**: Deploy as **two separate services**, not the root folder (monorepo orchestrator will fail).
+
+1. **Backend Web Service** (Render)
+   - Root: `backend/`, Build: `npm install`, Start: `npm start`
+   - Env: `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `NODE_ENV=production`
+   - After deploy: seed with `npm run seed` from Render shell
+
+2. **Frontend Static Site** (Render)
+   - Root: `frontend/`, Build: `npm install && npm run build`, Publish: `dist`
+   - Env: `VITE_API_URL=https://<backend-url>/api`
+
+3. **Local Dev**: `npm run dev` from root, or `docker compose up --build` for full stack.
 
 ## Submission Notes
 

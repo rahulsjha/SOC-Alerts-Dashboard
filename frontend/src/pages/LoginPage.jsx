@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { getApiErrorMessage } from '../api';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('analyst@company.com');
@@ -19,7 +20,7 @@ export default function LoginPage() {
       await login(email, password);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      setError(getApiErrorMessage(err, 'Login failed'));
     } finally {
       setLoading(false);
     }
