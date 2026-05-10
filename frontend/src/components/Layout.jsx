@@ -17,15 +17,10 @@ export default function Layout({ children }) {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <button
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-3 text-left"
+            className="text-left"
           >
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-rose-500 via-orange-500 to-amber-400 text-lg shadow-lg shadow-orange-500/25">
-              ⚠
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.32em] text-slate-400">SOC Console</p>
-              <h1 className="text-lg font-semibold leading-tight">Alerts Dashboard</h1>
-            </div>
+            <p className="text-xs uppercase tracking-[0.32em] text-slate-400">SOC Console</p>
+            <h1 className="text-lg font-semibold leading-tight">Alerts Dashboard</h1>
           </button>
 
           <nav className="flex items-center gap-2 sm:gap-3">

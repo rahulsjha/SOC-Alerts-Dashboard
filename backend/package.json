@@ -7,14 +7,16 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "seed": "node scripts/seedData.js"
+    "seed": "node scripts/seedData.js",
+    "generate:data": "node scripts/generateAlertsJson.js",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
-    "sqlite3": "^5.1.6",
+    "pg": "^8.13.1",
     "cors": "^2.8.5",
     "jsonwebtoken": "^9.0.0",
     "bcryptjs": "^2.4.3",
@@ -22,6 +24,7 @@
     "cookie-parser": "^1.4.6"
   },
   "devDependencies": {
-    "nodemon": "^2.0.20"
+    "nodemon": "^2.0.20",
+    "supertest": "^7.1.1"
   }
 }

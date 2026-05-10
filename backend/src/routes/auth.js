@@ -1,49 +1,46 @@
 import express from 'express';
 import bcryptjs from 'bcryptjs';
-import db from '../db.js';
+import { query } from '../db.js';
 import { generateToken, setAuthCookie, clearAuthCookie, getAuthenticatedUser, verifyToken } from '../auth.js';
 
 const router = express.Router();
 
 // POST /auth/login
-router.post('/login', (req, res) => {
-  const { email, password } = req.body;
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
-  }
-
-  db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
     }
+
+    const result = await query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    bcryptjs.compare(password, user.password_hash, (err, isMatch) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+    const isMatch = await bcryptjs.compare(password, user.password_hash);
+
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const token = generateToken(user.id);
+    setAuthCookie(res, token);
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        created_at: user.created_at
       }
-
-      if (!isMatch) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-
-      const token = generateToken(user.id);
-      setAuthCookie(res, token);
-
-      res.json({
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          created_at: user.created_at
-        }
-      });
     });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /auth/logout

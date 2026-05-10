@@ -57,6 +57,10 @@ export default function AlertDetailPage() {
       return null;
     }
 
+    if (typeof alert.raw_event === 'object') {
+      return alert.raw_event;
+    }
+
     try {
       return JSON.parse(alert.raw_event);
     } catch {

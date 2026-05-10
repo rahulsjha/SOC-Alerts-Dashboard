@@ -1,6 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { alertsAPI } from '../api';
+import { deriveRangeDates } from '../utils/alertsFilters';
+import {
+  buildBulkPayload,
+  buildCurrentFilterPreset,
+  deletePreset,
+  getPresetByName,
+  isAllVisibleSelected,
+  normalizePresetName,
+  toggleAlertSelection,
+  toggleSelectAllVisible,
+  upsertPreset
+} from '../utils/alertsListTools';
 
 const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
 
@@ -46,40 +58,7 @@ const sortOrders = [
   ['asc', 'Ascending']
 ];
 
-const deriveRangeDates = (range, startDate, endDate) => {
-  const today = new Date();
-  const toDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-
-  if (range === '24h') {
-    return {
-      startDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      endDate: toDay.toISOString()
-    };
-  }
-
-  if (range === '7d') {
-    return {
-      startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      endDate: toDay.toISOString()
-    };
-  }
-
-  if (range === '30d') {
-    return {
-      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      endDate: toDay.toISOString()
-    };
-  }
-
-  if (range === 'custom') {
-    return {
-      startDate: startDate ? new Date(`${startDate}T00:00:00.000`).toISOString() : undefined,
-      endDate: endDate ? new Date(`${endDate}T23:59:59.999`).toISOString() : undefined
-    };
-  }
-
-  return { startDate: undefined, endDate: undefined };
-};
+const presetStorageKey = 'soc-alerts-filter-presets';
 
 export default function AlertsListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -88,6 +67,12 @@ export default function AlertsListPage() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [savedPresets, setSavedPresets] = useState([]);
+  const [presetName, setPresetName] = useState('');
+  const [selectedPresetName, setSelectedPresetName] = useState('');
 
   const page = Number(searchParams.get('page') || '1');
   const severity = searchParams.get('severity') || '';
@@ -104,6 +89,26 @@ export default function AlertsListPage() {
     () => deriveRangeDates(range, startDateInput, endDateInput),
     [range, startDateInput, endDateInput]
   );
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(presetStorageKey);
+      if (!stored) {
+        return;
+      }
+
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        setSavedPresets(parsed);
+      }
+    } catch {
+      setSavedPresets([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(presetStorageKey, JSON.stringify(savedPresets));
+  }, [savedPresets]);
 
   useEffect(() => {
     const loadAlerts = async () => {
@@ -134,7 +139,11 @@ export default function AlertsListPage() {
     };
 
     loadAlerts();
-  }, [page, severity, status, category, q, sortBy, sortOrder, resolvedDates.startDate, resolvedDates.endDate]);
+  }, [page, severity, status, category, q, sortBy, sortOrder, resolvedDates.startDate, resolvedDates.endDate, refreshTick]);
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [alerts]);
 
   const updateParams = (updates) => {
     const next = new URLSearchParams(searchParams);
@@ -156,6 +165,70 @@ export default function AlertsListPage() {
 
   const clearFilters = () => {
     setSearchParams({ page: '1', sortBy, sortOrder });
+  };
+
+  const currentFilterPreset = buildCurrentFilterPreset({
+    severity,
+    status,
+    category,
+    range,
+    startDate: startDateInput,
+    endDate: endDateInput,
+    q,
+    sortBy,
+    sortOrder
+  });
+
+  const saveCurrentPreset = () => {
+    const trimmedName = normalizePresetName(presetName);
+    if (!trimmedName) {
+      return;
+    }
+
+    setSavedPresets(upsertPreset(savedPresets, trimmedName, currentFilterPreset));
+    setSelectedPresetName(trimmedName);
+    setPresetName('');
+  };
+
+  const applySelectedPreset = () => {
+    const preset = getPresetByName(savedPresets, selectedPresetName);
+    if (!preset) {
+      return;
+    }
+
+    updateParams({ ...preset.filters, page: '1' });
+  };
+
+  const deleteSelectedPreset = () => {
+    if (!selectedPresetName) {
+      return;
+    }
+
+    setSavedPresets((current) => deletePreset(current, selectedPresetName));
+    setSelectedPresetName('');
+  };
+
+  const allVisibleSelected = isAllVisibleSelected(alerts, selectedIds);
+
+  const onToggleAlertSelection = (id) => setSelectedIds((current) => toggleAlertSelection(current, id));
+
+  const onToggleSelectAllVisible = () => setSelectedIds((current) => toggleSelectAllVisible(alerts, current));
+
+  const runBulkUpdate = async (payload) => {
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      await Promise.all(selectedIds.map((id) => alertsAPI.update(id, payload)));
+      setSelectedIds([]);
+      setRefreshTick((current) => current + 1);
+    } catch (err) {
+      console.error('Bulk update failed:', err);
+    } finally {
+      setBulkSaving(false);
+    }
   };
 
   const summaryText = total === 0
@@ -323,9 +396,93 @@ export default function AlertsListPage() {
             </div>
           )}
         </div>
+
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Saved presets</p>
+          <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto_auto]">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input
+                value={presetName}
+                onChange={(event) => setPresetName(event.target.value)}
+                placeholder="Preset name (e.g. Critical queue)"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-300 focus:ring-4 focus:ring-slate-100"
+              />
+              <select
+                value={selectedPresetName}
+                onChange={(event) => setSelectedPresetName(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-300 focus:ring-4 focus:ring-slate-100"
+              >
+                <option value="">Select saved preset</option>
+                {savedPresets.map((preset) => (
+                  <option key={preset.name} value={preset.name}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={saveCurrentPreset}
+              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+            >
+              Save preset
+            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={applySelectedPreset}
+                disabled={!selectedPresetName}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Apply
+              </button>
+              <button
+                onClick={deleteSelectedPreset}
+                disabled={!selectedPresetName}
+                className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="overflow-hidden rounded-[1.75rem] border border-slate-200/80 bg-white shadow-[0_20px_50px_rgba(15,23,42,0.08)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-6 py-4">
+          <p className="text-sm font-medium text-slate-700">
+            {selectedIds.length > 0 ? `${selectedIds.length} selected` : 'Select alerts for bulk actions'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => runBulkUpdate(buildBulkPayload('investigating'))}
+              disabled={selectedIds.length === 0 || bulkSaving}
+              className="rounded-full border border-sky-200 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Mark investigating
+            </button>
+            <button
+              onClick={() => runBulkUpdate(buildBulkPayload('resolved'))}
+              disabled={selectedIds.length === 0 || bulkSaving}
+              className="rounded-full border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Mark resolved
+            </button>
+            <button
+              onClick={() => runBulkUpdate(buildBulkPayload('false_positive'))}
+              disabled={selectedIds.length === 0 || bulkSaving}
+              className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Mark false positive
+            </button>
+            <button
+              onClick={() => runBulkUpdate(buildBulkPayload('high'))}
+              disabled={selectedIds.length === 0 || bulkSaving}
+              className="rounded-full border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Set severity high
+            </button>
+          </div>
+        </div>
+
         {loading ? (
           <div className="p-10 text-center text-sm font-medium text-slate-600">Loading alerts...</div>
         ) : alerts.length === 0 ? (
@@ -336,6 +493,14 @@ export default function AlertsListPage() {
               <table className="min-w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50/80">
                   <tr className="text-left text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    <th className="px-6 py-4">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={onToggleSelectAllVisible}
+                        aria-label="Select all visible alerts"
+                      />
+                    </th>
                     <th className="px-6 py-4">Title</th>
                     <th className="px-6 py-4">Severity</th>
                     <th className="px-6 py-4">Status</th>
@@ -349,6 +514,14 @@ export default function AlertsListPage() {
                 <tbody className="divide-y divide-slate-100">
                   {alerts.map((alert) => (
                     <tr key={alert.id} className="transition hover:bg-slate-50/80">
+                      <td className="px-6 py-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(alert.id)}
+                          onChange={() => onToggleAlertSelection(alert.id)}
+                          aria-label={`Select ${alert.title}`}
+                        />
+                      </td>
                       <td className="px-6 py-4">
                         <button
                           onClick={() => navigate(`/alerts/${alert.id}`)}

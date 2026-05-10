@@ -1,105 +1,8 @@
 import express from 'express';
-import db from '../db.js';
+import { query } from '../db.js';
+import { buildFilters, buildOrderClause, buildTrendDays, severityOrder } from '../utils/alertsQuery.js';
 
 const router = express.Router();
-
-const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
-const allowedSeverities = new Set(severityOrder);
-const allowedStatuses = new Set(['new', 'investigating', 'resolved', 'false_positive']);
-const allowedCategories = new Set([
-  'malware',
-  'phishing',
-  'unauthorized_access',
-  'data_exfiltration',
-  'policy_violation',
-  'suspicious_login'
-]);
-const allowedSortFields = new Set(['timestamp', 'severity']);
-const allowedSortOrders = new Set(['asc', 'desc']);
-
-const severityRankSql = `CASE severity
-  WHEN 'critical' THEN 1
-  WHEN 'high' THEN 2
-  WHEN 'medium' THEN 3
-  WHEN 'low' THEN 4
-  WHEN 'info' THEN 5
-  ELSE 6
-END`;
-
-const runQuery = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      resolve(rows);
-    });
-  });
-
-const getQuery = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      resolve(row);
-    });
-  });
-
-const buildFilters = (query) => {
-  const filters = ['1 = 1'];
-  const params = [];
-
-  const searchTerm = typeof query.q === 'string' ? query.q.trim() : '';
-  if (searchTerm) {
-    filters.push('(title LIKE ? OR description LIKE ? OR affected_asset LIKE ? OR source LIKE ?)');
-    params.push(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`);
-  }
-
-  if (query.severity && allowedSeverities.has(query.severity)) {
-    filters.push('severity = ?');
-    params.push(query.severity);
-  }
-
-  if (query.status && allowedStatuses.has(query.status)) {
-    filters.push('status = ?');
-    params.push(query.status);
-  }
-
-  if (query.category && allowedCategories.has(query.category)) {
-    filters.push('category = ?');
-    params.push(query.category);
-  }
-
-  if (query.startDate) {
-    filters.push('timestamp >= ?');
-    params.push(query.startDate);
-  }
-
-  if (query.endDate) {
-    filters.push('timestamp <= ?');
-    params.push(query.endDate);
-  }
-
-  return { filters, params };
-};
-
-const buildOrderClause = (sortBy, sortOrder) => {
-  const normalizedSortBy = allowedSortFields.has(sortBy) ? sortBy : 'timestamp';
-  const normalizedSortOrder = allowedSortOrders.has(String(sortOrder).toLowerCase())
-    ? String(sortOrder).toLowerCase()
-    : 'desc';
-
-  if (normalizedSortBy === 'severity') {
-    return `${severityRankSql} ${normalizedSortOrder.toUpperCase()}, timestamp DESC`;
-  }
-
-  return `timestamp ${normalizedSortOrder.toUpperCase()}, ${severityRankSql}`;
-};
 
 // GET /alerts - list alerts with pagination, filtering, sorting
 router.get('/', async (req, res) => {
@@ -109,29 +12,33 @@ router.get('/', async (req, res) => {
     const orderClause = buildOrderClause(req.query.sortBy, req.query.sortOrder);
     const { filters, params } = buildFilters(req.query);
     const offset = (page - 1) * limit;
+    const limitPlaceholder = params.length + 1;
+    const offsetPlaceholder = params.length + 2;
 
-    const alerts = await runQuery(
+    const alertsResult = await query(
       `SELECT *
        FROM alerts
        WHERE ${filters.join(' AND ')}
        ORDER BY ${orderClause}
-       LIMIT ? OFFSET ?`,
+       LIMIT $${limitPlaceholder} OFFSET $${offsetPlaceholder}`,
       [...params, limit, offset]
     );
 
-    const totalRow = await getQuery(
+    const totalResult = await query(
       `SELECT COUNT(*) AS count
        FROM alerts
        WHERE ${filters.join(' AND ')}`,
       params
     );
 
+    const total = Number(totalResult.rows[0]?.count || 0);
+
     res.json({
-      alerts,
-      total: totalRow?.count || 0,
+      alerts: alertsResult.rows,
+      total,
       page,
       limit,
-      totalPages: Math.max(Math.ceil((totalRow?.count || 0) / limit), 1)
+      totalPages: Math.max(Math.ceil(total / limit), 1)
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -141,42 +48,45 @@ router.get('/', async (req, res) => {
 // GET /alerts/stats/dashboard - aggregated stats for the dashboard
 router.get('/stats/dashboard', async (req, res) => {
   try {
-    const [severityRows, categoryRows, statusRows, trendRows, totalsRow] = await Promise.all([
-      runQuery('SELECT severity, COUNT(*) AS count FROM alerts GROUP BY severity'),
-      runQuery('SELECT category, COUNT(*) AS count FROM alerts GROUP BY category'),
-      runQuery('SELECT status, COUNT(*) AS count FROM alerts GROUP BY status'),
-      runQuery(
-        `SELECT DATE(timestamp) AS day, COUNT(*) AS count
+    const [severityResult, categoryResult, statusResult, trendResult, totalsResult] = await Promise.all([
+      query('SELECT severity, COUNT(*)::int AS count FROM alerts GROUP BY severity'),
+      query('SELECT category, COUNT(*)::int AS count FROM alerts GROUP BY category'),
+      query('SELECT status, COUNT(*)::int AS count FROM alerts GROUP BY status'),
+      query(
+        `SELECT DATE(timestamp)::text AS day, COUNT(*)::int AS count
          FROM alerts
-         WHERE timestamp >= datetime('now', '-13 days')
+         WHERE timestamp >= NOW() - INTERVAL '13 days'
          GROUP BY DATE(timestamp)
          ORDER BY day ASC`
       ),
-      getQuery(
+      query(
         `SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN status IN ('new', 'investigating') THEN 1 ELSE 0 END) AS openCount,
-          SUM(CASE WHEN severity IN ('critical', 'high') THEN 1 ELSE 0 END) AS urgentCount
+          COUNT(*)::int AS total,
+          COALESCE(SUM(CASE WHEN status IN ('new', 'investigating') THEN 1 ELSE 0 END), 0)::int AS "openCount",
+          COALESCE(SUM(CASE WHEN severity IN ('critical', 'high') THEN 1 ELSE 0 END), 0)::int AS "urgentCount"
          FROM alerts`
       )
     ]);
 
+    const severityRows = severityResult.rows;
+    const categoryRows = categoryResult.rows;
+    const statusRows = statusResult.rows;
+    const trendRows = trendResult.rows;
+    const totalsRow = totalsResult.rows[0] || {};
+
     const trendMap = new Map(trendRows.map((row) => [row.day, row.count]));
     const trend = [];
 
-    for (let offset = 13; offset >= 0; offset -= 1) {
-      const date = new Date();
-      date.setDate(date.getDate() - offset);
-      const day = date.toISOString().slice(0, 10);
+    buildTrendDays().forEach((day) => {
       trend.push({ day, count: trendMap.get(day) || 0 });
-    }
+    });
 
-    const total = totalsRow?.total || 0;
+    const total = Number(totalsRow?.total || 0);
 
     res.json({
       total,
-      openCount: totalsRow?.openCount || 0,
-      urgentCount: totalsRow?.urgentCount || 0,
+      openCount: Number(totalsRow?.openCount || 0),
+      urgentCount: Number(totalsRow?.urgentCount || 0),
       bySeverity: severityRows.sort(
         (left, right) => severityOrder.indexOf(left.severity) - severityOrder.indexOf(right.severity)
       ),
@@ -192,7 +102,8 @@ router.get('/stats/dashboard', async (req, res) => {
 // GET /alerts/:id - single alert
 router.get('/:id', async (req, res) => {
   try {
-    const alert = await getQuery('SELECT * FROM alerts WHERE id = ?', [req.params.id]);
+    const result = await query('SELECT * FROM alerts WHERE id = $1', [req.params.id]);
+    const alert = result.rows[0];
 
     if (!alert) {
       return res.status(404).json({ error: 'Alert not found' });
@@ -210,14 +121,16 @@ router.patch('/:id', async (req, res) => {
     const updates = [];
     const params = [];
     const { status, severity, assignee } = req.body;
+    let idx = 1;
 
     if (status !== undefined) {
       if (!allowedStatuses.has(status)) {
         return res.status(400).json({ error: 'Invalid status value' });
       }
 
-      updates.push('status = ?');
+      updates.push(`status = $${idx}`);
       params.push(status);
+      idx += 1;
     }
 
     if (severity !== undefined) {
@@ -225,42 +138,35 @@ router.patch('/:id', async (req, res) => {
         return res.status(400).json({ error: 'Invalid severity value' });
       }
 
-      updates.push('severity = ?');
+      updates.push(`severity = $${idx}`);
       params.push(severity);
+      idx += 1;
     }
 
     if (assignee !== undefined) {
-      updates.push('assignee = ?');
+      updates.push(`assignee = $${idx}`);
       params.push(assignee || null);
+      idx += 1;
     }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
     }
 
-    updates.push('updated_at = CURRENT_TIMESTAMP');
+    updates.push('updated_at = NOW()');
     params.push(req.params.id);
 
-    const result = await new Promise((resolve, reject) => {
-      db.run(
-        `UPDATE alerts SET ${updates.join(', ')} WHERE id = ?`,
-        params,
-        function (err) {
-          if (err) {
-            reject(err);
-            return;
-          }
+    const updateResult = await query(
+      `UPDATE alerts SET ${updates.join(', ')} WHERE id = $${idx}`,
+      params
+    );
 
-          resolve(this);
-        }
-      );
-    });
-
-    if (result.changes === 0) {
+    if (updateResult.rowCount === 0) {
       return res.status(404).json({ error: 'Alert not found' });
     }
 
-    const alert = await getQuery('SELECT * FROM alerts WHERE id = ?', [req.params.id]);
+    const alertResult = await query('SELECT * FROM alerts WHERE id = $1', [req.params.id]);
+    const alert = alertResult.rows[0];
     res.json(alert);
   } catch (err) {
     res.status(500).json({ error: err.message });
