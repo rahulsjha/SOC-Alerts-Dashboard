@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFilters, buildOrderClause, buildTrendDays, severityOrder } from '../src/utils/alertsQuery.js';
+import { buildFilters, buildMonthLabels, buildOrderClause, buildTrendDays, severityOrder } from '../src/utils/alertsQuery.js';
 
 test('buildFilters always starts with a neutral clause', () => {
   const result = buildFilters({});
@@ -147,6 +147,20 @@ test('buildTrendDays supports a custom window size', () => {
   const days = buildTrendDays(new Date('2026-05-10T12:00:00.000Z'), 5);
 
   assert.deepEqual(days, ['2026-05-06', '2026-05-07', '2026-05-08', '2026-05-09', '2026-05-10']);
+});
+
+test('buildMonthLabels returns a six month sequence by default', () => {
+  const labels = buildMonthLabels(new Date('2026-05-10T12:00:00.000Z'));
+
+  assert.equal(labels.length, 6);
+  assert.equal(labels[0].key, '2025-12');
+  assert.equal(labels[5].key, '2026-05');
+});
+
+test('buildMonthLabels supports a custom window size', () => {
+  const labels = buildMonthLabels(new Date('2026-05-10T12:00:00.000Z'), 3);
+
+  assert.deepEqual(labels.map((item) => item.key), ['2026-03', '2026-04', '2026-05']);
 });
 
 test('severityOrder keeps critical alerts first', () => {

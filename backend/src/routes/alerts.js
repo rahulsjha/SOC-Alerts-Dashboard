@@ -1,6 +1,14 @@
 import express from 'express';
 import { query } from '../db.js';
-import { buildFilters, buildOrderClause, buildTrendDays, severityOrder } from '../utils/alertsQuery.js';
+import {
+  allowedSeverities,
+  allowedStatuses,
+  buildFilters,
+  buildMonthLabels,
+  buildOrderClause,
+  buildTrendDays,
+  severityOrder
+} from '../utils/alertsQuery.js';
 
 const router = express.Router();
 
@@ -68,11 +76,30 @@ router.get('/stats/dashboard', async (req, res) => {
       )
     ]);
 
+    const monthLabels = buildMonthLabels();
+    const monthKeys = monthLabels.map((item) => item.key);
+    const monthTrendResult = await query(
+      `SELECT TO_CHAR(date_trunc('month', timestamp), 'YYYY-MM') AS month, COUNT(*)::int AS count
+       FROM alerts
+       WHERE timestamp >= date_trunc('month', NOW()) - INTERVAL '5 months'
+       GROUP BY date_trunc('month', timestamp)
+       ORDER BY month ASC`
+    );
+    const dispositionResult = await query(
+      `SELECT
+        SUM(CASE WHEN status = 'false_positive' THEN 1 ELSE 0 END)::int AS "falsePositive",
+        SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END)::int AS "truePositive",
+        SUM(CASE WHEN status IN ('new', 'investigating') THEN 1 ELSE 0 END)::int AS other
+       FROM alerts`
+    );
+
     const severityRows = severityResult.rows;
     const categoryRows = categoryResult.rows;
     const statusRows = statusResult.rows;
     const trendRows = trendResult.rows;
     const totalsRow = totalsResult.rows[0] || {};
+    const monthRows = monthTrendResult.rows;
+    const dispositionRow = dispositionResult.rows[0] || {};
 
     const trendMap = new Map(trendRows.map((row) => [row.day, row.count]));
     const trend = [];
@@ -80,6 +107,18 @@ router.get('/stats/dashboard', async (req, res) => {
     buildTrendDays().forEach((day) => {
       trend.push({ day, count: trendMap.get(day) || 0 });
     });
+
+    const monthMap = new Map(monthRows.map((row) => [row.month, row.count]));
+    const sixMonthTrend = monthLabels.map((item) => ({
+      month: item.label,
+      key: item.key,
+      count: monthMap.get(item.key) || 0
+    }));
+
+    const totalDisposition =
+      Number(dispositionRow.falsePositive || 0) +
+      Number(dispositionRow.truePositive || 0) +
+      Number(dispositionRow.other || 0);
 
     const total = Number(totalsRow?.total || 0);
 
@@ -92,7 +131,14 @@ router.get('/stats/dashboard', async (req, res) => {
       ),
       byCategory: categoryRows.sort((left, right) => right.count - left.count),
       byStatus: statusRows,
-      trend
+      trend,
+      sixMonthTrend,
+      disposition: {
+        falsePositive: Number(dispositionRow.falsePositive || 0),
+        truePositive: Number(dispositionRow.truePositive || 0),
+        other: Number(dispositionRow.other || 0),
+        total: totalDisposition
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -114,6 +160,9 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
 
 // PATCH /alerts/:id - update alert
 router.patch('/:id', async (req, res) => {

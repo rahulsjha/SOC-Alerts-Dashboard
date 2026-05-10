@@ -94,4 +94,18 @@ export const buildTrendDays = (now = new Date(), count = 14) => {
   return days;
 };
 
-export { severityOrder, severityRankSql };
+export const buildMonthLabels = (now = new Date(), count = 6) => {
+  const labels = [];
+
+  for (let offset = count - 1; offset >= 0; offset -= 1) {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1));
+    labels.push({
+      key: date.toISOString().slice(0, 7),
+      label: date.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+    });
+  }
+
+  return labels;
+};
+
+export { severityOrder, severityRankSql, allowedSeverities, allowedStatuses, allowedCategories };
